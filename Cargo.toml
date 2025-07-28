@@ -9,7 +9,3 @@ chrono = "0.4"
 tui = "0.19.0"
 crossterm = "0.29.0"
 clap = { version = "4.4.0", features = ["derive"] }
-
-[target.x86_64-unknown-linux-musl]
-# Enable static linking
-rustflags = ["-C", "target-feature=+crt-static"]

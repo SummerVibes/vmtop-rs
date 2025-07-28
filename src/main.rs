@@ -1,16 +1,15 @@
 use std::{time::Duration, collections::HashMap, fs};
 use std::io::{Write, stdout};
-use std::path::Path;
 use chrono::Local;
 use sysinfo::{Pid, Process, System};
 use tui::{backend::CrosstermBackend, Terminal};
 use tui::widgets::{Block, Borders, Table, Row, Cell};
-use tui::layout::{Constraint, Layout};
+use tui::layout::Constraint;
 use tui::style::{Style, Color, Modifier};
 use crossterm::{execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
 use crossterm::event::{self, Event, KeyCode};
 
-// 日志级别枚举
+// Log level enumeration
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum LogLevel {
     Info,
@@ -19,12 +18,12 @@ enum LogLevel {
     Debug,
 }
 
-// 日志函数
+// Log function
 fn log(level: LogLevel, message: &str) {
     let log_dir = "/var/log/vmtop";
     let log_file = format!("{}/vmtop.log", log_dir);
     
-    // 确保日志目录存在
+    // Ensure log directory exists
     if let Err(e) = fs::create_dir_all(log_dir) {
         eprintln!("Failed to create log directory: {}", e);
         return;
@@ -40,7 +39,7 @@ fn log(level: LogLevel, message: &str) {
     
     let log_entry = format!("[{}] {} - {}\n", timestamp, level_str, message);
     
-    // 追加写入日志文件
+    // Append to log file
     if let Ok(mut file) = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -54,7 +53,7 @@ fn log(level: LogLevel, message: &str) {
     }
 }
 
-// 便捷的日志宏
+// Convenient log macros
 macro_rules! log_info {
     ($($arg:tt)*) => {
         log(LogLevel::Info, &format!($($arg)*));
@@ -79,7 +78,7 @@ macro_rules! log_debug {
     };
 }
 
-// 使用条件编译定义架构特定的exit统计结构
+// Use conditional compilation to define architecture-specific exit statistics structure
 #[derive(Default, Clone)]
 struct VmExitStats {
     exits: u64,
@@ -105,10 +104,10 @@ struct VmExitStats {
 
 struct VMStats {
     pid: Pid,
-    uuid: String,           // 虚拟机UUID
-    process_cpu: f32,       // 总CPU使用率
-    user_cpu: f32,          // 用户态CPU使用率
-    kernel_cpu: f32,        // 内核态CPU使用率
+    uuid: String,           // Virtual machine UUID
+    process_cpu: f32,       // Total CPU usage
+    user_cpu: f32,          // User space CPU usage
+    kernel_cpu: f32,        // Kernel space CPU usage
     vcpu_usage: f32,
     memory: u64,
     exit_stats_delta: VmExitStats,    // Delta since last refresh
@@ -122,7 +121,7 @@ fn calculate_vcpu_usage(sys: &System, pid: &Pid) -> f32 {
         None => return total_vcpu,
     };
     
-    // 在sysinfo 0.30中，tasks()方法返回Option<&[Pid]>
+    // In sysinfo 0.30, tasks() method returns Option<&[Pid]>
     if let Some(tasks) = process.tasks() {
         for task_pid in tasks {
             if let Some(task_process) = sys.process(*task_pid) {
@@ -136,7 +135,7 @@ fn calculate_vcpu_usage(sys: &System, pid: &Pid) -> f32 {
     total_vcpu
 }
 
-// 架构特定的exit统计收集函数
+// Architecture-specific exit statistics collection function
 #[cfg(target_arch = "x86_64")]
 fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
     let debug_path = "/sys/kernel/debug/kvm";
@@ -236,30 +235,30 @@ fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
     stats
 }
 
-// 增强的parse_exit_count函数，支持多种格式
+// Enhanced parse_exit_count function supporting multiple formats
 fn parse_exit_count(content: &str) -> u64 {
     let mut total = 0;
     
-    // 处理空内容
+    // Handle empty content
     if content.trim().is_empty() {
         return 0;
     }
     
-    // 处理单行数字格式
+    // Handle single line number format
     if content.lines().count() == 1 {
         if let Ok(num) = content.trim().parse::<u64>() {
             return num;
         }
     }
     
-    // 处理CPU格式：CPU0: 12345
+    // Handle CPU format: CPU0: 12345
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
         
-        // 尝试解析CPU格式
+        // Try to parse CPU format
         if line.starts_with("CPU") {
             let parts: Vec<&str> = line.split(':').collect();
             if parts.len() >= 2 {
@@ -268,7 +267,7 @@ fn parse_exit_count(content: &str) -> u64 {
                 }
             }
         } 
-        // 尝试解析简单数字格式
+        // Try to parse simple number format
         else if let Ok(num) = line.parse::<u64>() {
             total += num;
         }
@@ -277,7 +276,7 @@ fn parse_exit_count(content: &str) -> u64 {
     total
 }
 
-// 扫描/sys/kernel/debug/kvm目录获取所有QEMU进程的PID
+// Scan /sys/kernel/debug/kvm directory to get all QEMU process PIDs
 fn scan_kvm_pids() -> Vec<Pid> {
     let debug_path = "/sys/kernel/debug/kvm";
     let mut pids = Vec::new();
@@ -285,7 +284,7 @@ fn scan_kvm_pids() -> Vec<Pid> {
     if let Ok(entries) = fs::read_dir(debug_path) {
         for entry in entries.flatten() {
             if let Some(dir_name) = entry.file_name().to_str() {
-                // 目录名格式通常是 "12345-" 或 "12345-guest"
+                // Directory name format is usually "12345-" or "12345-guest"
                 if let Some(pid_str) = dir_name.split('-').next() {
                     if let Ok(pid_num) = pid_str.parse::<usize>() {
                         pids.push(Pid::from(pid_num));
@@ -301,24 +300,24 @@ fn scan_kvm_pids() -> Vec<Pid> {
     pids
 }
 
-// 从QEMU进程命令行参数中提取UUID
+// Extract UUID from QEMU process command line arguments
 fn extract_vm_uuid(process: &Process) -> String {
     let cmd = process.cmd();
     
-    // 查找 -uuid 参数
+    // Look for -uuid parameter
     for (i, arg) in cmd.iter().enumerate() {
         if arg == "-uuid" && i + 1 < cmd.len() {
             return cmd[i + 1].to_string();
         }
     }
     
-    // 如果没有找到 -uuid 参数，尝试从 -name 参数中提取
+    // If -uuid parameter not found, try to extract from -name parameter
     for (i, arg) in cmd.iter().enumerate() {
         if arg == "-name" && i + 1 < cmd.len() {
             let name = &cmd[i + 1];
-            // 检查是否包含UUID格式
+            // Check if it contains UUID format
             if name.len() >= 36 {
-                // 查找UUID格式 (8-4-4-4-12)
+                // Look for UUID format (8-4-4-4-12)
                 let parts: Vec<&str> = name.split(',').collect();
                 for part in parts {
                     if part.len() == 36 && part.chars().filter(|&c| c == '-').count() == 4 {
@@ -330,12 +329,12 @@ fn extract_vm_uuid(process: &Process) -> String {
         }
     }
     
-    // 回退到进程名
+    // Fallback to process name
     process.name().to_string()
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 初始化终端
+    // Initialize terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -343,7 +342,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // 初始化日志
+    // Initialize logging
     log_info!("vmtop starting...");
     
     let mut system = System::new_all();
@@ -357,21 +356,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         let mut vm_stats: Vec<VMStats> = Vec::new();
         
-        // 通过扫描/sys/kernel/debug/kvm目录来查找QEMU进程
+        // Find QEMU processes by scanning /sys/kernel/debug/kvm directory
         let kvm_pids = scan_kvm_pids();
         
         for pid in kvm_pids {
             if let Some(process) = system.process(pid) {
                 log_debug!("Found QEMU process via KVM: {} - PID: {}", process.name(), pid);
                 
-                // Calculate CPU usage - 分离用户态和内核态
+                // Calculate CPU usage - separate user and kernel space
                 let total_cpu_time = process.cpu_usage() as u64;
                 
-                // 在sysinfo 0.30中，使用cpu_usage()作为总CPU使用率
-                // 由于0.30版本没有直接的user_cpu_time和system_cpu_time方法，
-                // 我们使用进程的CPU使用率作为近似值
-                let user_cpu_ratio = 0.7; // 假设70%为用户态
-                let kernel_cpu_ratio = 0.3; // 假设30%为内核态
+                // In sysinfo 0.30, use cpu_usage() as total CPU usage
+                // Since version 0.30 doesn't have direct user_cpu_time and system_cpu_time methods,
+                // we use process CPU usage as approximation
+                let user_cpu_ratio = 0.7; // Assume 70% user space
+                let kernel_cpu_ratio = 0.3; // Assume 30% kernel space
                 
                 let prev_total = prev_cpu_times.get(&pid).unwrap_or(&0);
                 let total_delta = total_cpu_time.saturating_sub(*prev_total) as f32;
@@ -384,7 +383,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Collect VM exit statistics
                 let current_stats = collect_vmexit_stats(pid);
                 
-// Calculate deltas
+                // Calculate deltas
                 let mut delta_stats = VmExitStats::default();
                 if let Some(prev_stats) = prev_exit_stats.get(&pid) {
                     delta_stats.exits = current_stats.exits.saturating_sub(prev_stats.exits);
@@ -422,11 +421,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         
-        // 使用tui库显示数据
+        // Use tui library to display data
         terminal.draw(|f| {
             let size = f.size();
             
-            // 架构特定的表头和列宽
+            // Architecture-specific headers and column widths
             #[cfg(target_arch = "x86_64")]
             {
                 let headers = vec![
@@ -531,49 +530,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 f.render_widget(table, size);
             }
             
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-            {
-                let headers = vec![
-                    Cell::from("PID"),
-                    Cell::from("UUID"),
-                    Cell::from("User%"),
-                    Cell::from("Kernel%"),
-                    Cell::from("vCPU%"),
-                    Cell::from("Memory(MB)"),
-                    Cell::from("Exits"),
-                ];
-                
-                let widths = &[
-                    Constraint::Length(10),
-                    Constraint::Length(36),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(12),
-                    Constraint::Length(8),
-                ];
-                
-                let mut rows = Vec::new();
-                for vm in &vm_stats {
-                    rows.push(Row::new(vec![
-                        Cell::from(vm.pid.to_string()),
-                        Cell::from(vm.uuid.clone()),
-                        Cell::from(format!("{:.2}", vm.user_cpu)),
-                        Cell::from(format!("{:.2}", vm.kernel_cpu)),
-                        Cell::from(format!("{:.2}", vm.vcpu_usage)),
-                        Cell::from(format!("{:.2}", vm.memory as f64 / 1024.0 / 1024.0)),
-                        Cell::from(vm.exit_stats_delta.exits.to_string()),
-                    ]));
-                }
-                
-                let table = Table::new(rows)
-                    .header(Row::new(headers).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
-                    .block(Block::default().title("vmtop - Virtual Machine Monitor").borders(Borders::ALL))
-                    .widths(widths);
-                
-                f.render_widget(table, size);
-            }
-            
             if vm_stats.is_empty() {
                 let empty_row = Row::new(vec![
                     Cell::from("-"),
@@ -610,7 +566,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         })?;
         
-        // 检查键盘事件
+        // Check keyboard events
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
@@ -630,7 +586,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
     
-    // 清理终端
+    // Clean up terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
