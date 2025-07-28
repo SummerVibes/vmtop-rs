@@ -89,6 +89,14 @@ struct VmExitStats {
     irq_exits: u64,
     #[cfg(target_arch = "x86_64")]
     kvm_msr_write: u64,
+    #[cfg(target_arch = "x86_64")]
+    host_state_reload: u64,
+    #[cfg(target_arch = "x86_64")]
+    io_exits: u64,
+    #[cfg(target_arch = "x86_64")]
+    mmio_exits: u64,
+    #[cfg(target_arch = "x86_64")]
+    insn_emulation: u64,
     
     #[cfg(target_arch = "aarch64")]
     hvc_exit_stat: u64,
@@ -150,6 +158,10 @@ fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
                     let halt_exits_path = entry.path().join("halt_exits");
                     let irq_exits_path = entry.path().join("irq_exits");
                     let kvm_msr_write_path = entry.path().join("kvm_msr_write");
+                    let host_state_reload_path = entry.path().join("host_state_reload");
+                    let io_exits_path = entry.path().join("io_exits");
+                    let mmio_exits_path = entry.path().join("mmio_exits");
+                    let insn_emulation_path = entry.path().join("insn_emulation");
                     let exits_path = entry.path().join("exits");
                     
                     if let Ok(content) = fs::read_to_string(&exits_path) {
@@ -163,6 +175,18 @@ fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
                     }
                     if let Ok(content) = fs::read_to_string(&kvm_msr_write_path) {
                         stats.kvm_msr_write = parse_exit_count(&content);
+                    }
+                    if let Ok(content) = fs::read_to_string(&host_state_reload_path) {
+                        stats.host_state_reload = parse_exit_count(&content);
+                    }
+                    if let Ok(content) = fs::read_to_string(&io_exits_path) {
+                        stats.io_exits = parse_exit_count(&content);
+                    }
+                    if let Ok(content) = fs::read_to_string(&mmio_exits_path) {
+                        stats.mmio_exits = parse_exit_count(&content);
+                    }
+                    if let Ok(content) = fs::read_to_string(&insn_emulation_path) {
+                        stats.insn_emulation = parse_exit_count(&content);
                     }
                 }
             }
@@ -372,6 +396,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         delta_stats.halt_exits = current_stats.halt_exits.saturating_sub(prev_stats.halt_exits);
                         delta_stats.irq_exits = current_stats.irq_exits.saturating_sub(prev_stats.irq_exits);
                         delta_stats.kvm_msr_write = current_stats.kvm_msr_write.saturating_sub(prev_stats.kvm_msr_write);
+                        delta_stats.host_state_reload = current_stats.host_state_reload.saturating_sub(prev_stats.host_state_reload);
+                        delta_stats.io_exits = current_stats.io_exits.saturating_sub(prev_stats.io_exits);
+                        delta_stats.mmio_exits = current_stats.mmio_exits.saturating_sub(prev_stats.mmio_exits);
+                        delta_stats.insn_emulation = current_stats.insn_emulation.saturating_sub(prev_stats.insn_emulation);
                     }
                     
                     #[cfg(target_arch = "aarch64")]
@@ -411,26 +439,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Cell::from("PID"),
                     Cell::from("UUID"),
                     Cell::from("User%"),
-                    Cell::from("Kernel%"),
+                    Cell::from("Kern%"),
                     Cell::from("vCPU%"),
-                    Cell::from("Memory(MB)"),
+                    Cell::from("Mem(MB)"),
                     Cell::from("Exits"),
                     Cell::from("Halt"),
                     Cell::from("IRQ"),
                     Cell::from("MSR"),
+                    Cell::from("Reload"),
+                    Cell::from("IO"),
+                    Cell::from("MMIO"),
+                    Cell::from("Insn"),
                 ];
                 
                 let widths = &[
-                    Constraint::Length(8),
+                    Constraint::Length(6),
                     Constraint::Length(36),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
                     Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(12),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
+                    Constraint::Length(7),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
                 ];
                 
                 let mut rows = Vec::new();
@@ -446,6 +482,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Cell::from(vm.exit_stats_delta.halt_exits.to_string()),
                         Cell::from(vm.exit_stats_delta.irq_exits.to_string()),
                         Cell::from(vm.exit_stats_delta.kvm_msr_write.to_string()),
+                        Cell::from(vm.exit_stats_delta.host_state_reload.to_string()),
+                        Cell::from(vm.exit_stats_delta.io_exits.to_string()),
+                        Cell::from(vm.exit_stats_delta.mmio_exits.to_string()),
+                        Cell::from(vm.exit_stats_delta.insn_emulation.to_string()),
                     ]));
                 }
                 
@@ -463,30 +503,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Cell::from("PID"),
                     Cell::from("UUID"),
                     Cell::from("User%"),
-                    Cell::from("Kernel%"),
+                    Cell::from("Kern%"),
                     Cell::from("vCPU%"),
-                    Cell::from("Memory(MB)"),
+                    Cell::from("Mem(MB)"),
                     Cell::from("Exits"),
                     Cell::from("HVC"),
-                    Cell::from("MMIO_K"),
-                    Cell::from("MMIO_U"),
+                    Cell::from("MMIO-K"),
+                    Cell::from("MMIO-U"),
                     Cell::from("WFE"),
                     Cell::from("WFI"),
                 ];
                 
                 let widths = &[
-                    Constraint::Length(8),
+                    Constraint::Length(6),
                     Constraint::Length(36),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
                     Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(12),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
-                    Constraint::Length(8),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
+                    Constraint::Length(7),
+                    Constraint::Length(7),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
                 ];
                 
                 let mut rows = Vec::new();
