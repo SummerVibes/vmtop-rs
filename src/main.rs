@@ -214,27 +214,6 @@ fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
     stats
 }
 
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
-    log_warn!("Unsupported architecture, only collecting basic exits");
-    let debug_path = "/sys/kernel/debug/kvm";
-    let mut stats = VmExitStats::default();
-    
-    if let Ok(entries) = fs::read_dir(debug_path) {
-        for entry in entries.flatten() {
-            if let Some(dir_name) = entry.file_name().to_str() {
-                if dir_name.starts_with(&format!("{}-", pid)) {
-                    let exits_path = entry.path().join("exits");
-                    if let Ok(content) = fs::read_to_string(&exits_path) {
-                        stats.exits = parse_exit_count(&content);
-                    }
-                }
-            }
-        }
-    }
-    stats
-}
-
 // Enhanced parse_exit_count function supporting multiple formats
 fn parse_exit_count(content: &str) -> u64 {
     let mut total = 0;
@@ -435,18 +414,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Cell::from("Kernel%"),
                     Cell::from("vCPU%"),
                     Cell::from("Memory(MB)"),
+                    Cell::from("Exits"),
                     Cell::from("Halt"),
                     Cell::from("IRQ"),
                     Cell::from("MSR"),
                 ];
                 
                 let widths = &[
-                    Constraint::Length(10),
+                    Constraint::Length(8),
                     Constraint::Length(36),
                     Constraint::Length(8),
                     Constraint::Length(8),
                     Constraint::Length(8),
                     Constraint::Length(12),
+                    Constraint::Length(8),
                     Constraint::Length(8),
                     Constraint::Length(8),
                     Constraint::Length(8),
@@ -461,6 +442,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Cell::from(format!("{:.2}", vm.kernel_cpu)),
                         Cell::from(format!("{:.2}", vm.vcpu_usage)),
                         Cell::from(format!("{:.2}", vm.memory as f64 / 1024.0 / 1024.0)),
+                        Cell::from(vm.exit_stats_delta.exits.to_string()),
                         Cell::from(vm.exit_stats_delta.halt_exits.to_string()),
                         Cell::from(vm.exit_stats_delta.irq_exits.to_string()),
                         Cell::from(vm.exit_stats_delta.kvm_msr_write.to_string()),
@@ -484,6 +466,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Cell::from("Kernel%"),
                     Cell::from("vCPU%"),
                     Cell::from("Memory(MB)"),
+                    Cell::from("Exits"),
                     Cell::from("HVC"),
                     Cell::from("MMIO_K"),
                     Cell::from("MMIO_U"),
@@ -492,12 +475,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ];
                 
                 let widths = &[
-                    Constraint::Length(10),
+                    Constraint::Length(8),
                     Constraint::Length(36),
                     Constraint::Length(8),
                     Constraint::Length(8),
                     Constraint::Length(8),
                     Constraint::Length(12),
+                    Constraint::Length(8),
                     Constraint::Length(8),
                     Constraint::Length(8),
                     Constraint::Length(8),
@@ -514,6 +498,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Cell::from(format!("{:.2}", vm.kernel_cpu)),
                         Cell::from(format!("{:.2}", vm.vcpu_usage)),
                         Cell::from(format!("{:.2}", vm.memory as f64 / 1024.0 / 1024.0)),
+                        Cell::from(vm.exit_stats_delta.exits.to_string()),
                         Cell::from(vm.exit_stats_delta.hvc_exit_stat.to_string()),
                         Cell::from(vm.exit_stats_delta.mmio_exit_kernel.to_string()),
                         Cell::from(vm.exit_stats_delta.mmio_exit_user.to_string()),
@@ -539,6 +524,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Cell::from("-"),
                     Cell::from("-"),
                     Cell::from("-"),
+                    Cell::from("-"),
                 ]);
                 
                 let table = Table::new(vec![empty_row])
@@ -549,16 +535,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Cell::from("Kernel%"),
                         Cell::from("vCPU%"),
                         Cell::from("Memory(MB)"),
+                        Cell::from("Exits"),
                         Cell::from("Status"),
                     ]).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
                     .block(Block::default().title("vmtop - Virtual Machine Monitor").borders(Borders::ALL))
                     .widths(&[
-                        Constraint::Length(10),
+                        Constraint::Length(8),
                         Constraint::Length(36),
                         Constraint::Length(8),
                         Constraint::Length(8),
                         Constraint::Length(8),
                         Constraint::Length(12),
+                        Constraint::Length(8),
                         Constraint::Length(8),
                     ]);
                 
