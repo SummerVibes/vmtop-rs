@@ -78,36 +78,51 @@ macro_rules! log_debug {
     };
 }
 
-// Use conditional compilation to define architecture-specific exit statistics structure
-#[derive(Default, Clone)]
-struct VmExitStats {
-    exits: u64,
+// Remove the unused VmExitStats struct
+// #[derive(Default, Clone)]
+// struct VmExitStats {
+//     exits: u64,
     
-    #[cfg(target_arch = "x86_64")]
-    halt_exits: u64,
-    #[cfg(target_arch = "x86_64")]
-    irq_exits: u64,
-    #[cfg(target_arch = "x86_64")]
-    kvm_msr_write: u64,
-    #[cfg(target_arch = "x86_64")]
-    host_state_reload: u64,
-    #[cfg(target_arch = "x86_64")]
-    io_exits: u64,
-    #[cfg(target_arch = "x86_64")]
-    mmio_exits: u64,
-    #[cfg(target_arch = "x86_64")]
-    insn_emulation: u64,
+//     #[cfg(target_arch = "x86_64")]
+//     halt_exits: u64,
+//     #[cfg(target_arch = "x86_64")]
+//     irq_exits: u64,
+//     #[cfg(target_arch = "x86_64")]
+//     kvm_msr_write: u64,
+//     #[cfg(target_arch = "x86_64")]
+//     host_state_reload: u64,
+//     #[cfg(target_arch = "x86_64")]
+//     io_exits: u64,
+//     #[cfg(target_arch = "x86_64")]
+//     mmio_exits: u64,
+//     #[cfg(target_arch = "x86_64")]
+//     insn_emulation: u64,
     
-    #[cfg(target_arch = "aarch64")]
-    hvc_exit_stat: u64,
-    #[cfg(target_arch = "aarch64")]
-    mmio_exit_kernel: u64,
-    #[cfg(target_arch = "aarch64")]
-    mmio_exit_user: u64,
-    #[cfg(target_arch = "aarch64")]
-    wfe_exit_stat: u64,
-    #[cfg(target_arch = "aarch64")]
-    wfi_exit_stat: u64,
+//     #[cfg(target_arch = "aarch64")]
+//     hvc_exit_stat: u64,
+//     #[cfg(target_arch = "aarch64")]
+//     mmio_exit_kernel: u64,
+//     #[cfg(target_arch = "aarch64")]
+//     mmio_exit_user: u64,
+//     #[cfg(target_arch = "aarch64")]
+//     wfe_exit_stat: u64,
+//     #[cfg(target_arch = "aarch64")]
+//     wfi_exit_stat: u64,
+// }
+
+#[derive(Debug, Clone)]
+struct DebugFileInfo {
+    name: String,
+    current_value: u64,
+    delta_value: u64,
+}
+
+#[derive(Default)]
+struct AppState {
+    selected_index: usize,
+    show_detail: bool,
+    detail_pid: Option<Pid>,
+    prev_exit_stats_detail: HashMap<Pid, HashMap<String, u64>>,
 }
 
 struct VMStats {
@@ -118,7 +133,7 @@ struct VMStats {
     kernel_cpu: f32,        // Kernel space CPU usage
     vcpu_usage: f32,
     memory: u64,
-    exit_stats_delta: VmExitStats,    // Delta since last refresh
+    exit_stats_delta: HashMap<String, u64>,    // Delta since last refresh
 }
 
 fn calculate_vcpu_usage(sys: &System, pid: &Pid) -> f32 {
@@ -145,9 +160,9 @@ fn calculate_vcpu_usage(sys: &System, pid: &Pid) -> f32 {
 
 // Architecture-specific exit statistics collection function
 #[cfg(target_arch = "x86_64")]
-fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
+fn collect_vmexit_stats(pid: Pid) -> HashMap<String, u64> {
     let debug_path = "/sys/kernel/debug/kvm";
-    let mut stats = VmExitStats::default();
+    let mut stats = HashMap::new();
     
     log_debug!("Collecting x86_64 exit stats for PID: {}", pid);
     
@@ -165,28 +180,28 @@ fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
                     let exits_path = entry.path().join("exits");
                     
                     if let Ok(content) = fs::read_to_string(&exits_path) {
-                        stats.exits = parse_exit_count(&content);
+                        stats.insert("exits".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&halt_exits_path) {
-                        stats.halt_exits = parse_exit_count(&content);
+                        stats.insert("halt_exits".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&irq_exits_path) {
-                        stats.irq_exits = parse_exit_count(&content);
+                        stats.insert("irq_exits".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&kvm_msr_write_path) {
-                        stats.kvm_msr_write = parse_exit_count(&content);
+                        stats.insert("kvm_msr_write".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&host_state_reload_path) {
-                        stats.host_state_reload = parse_exit_count(&content);
+                        stats.insert("host_state_reload".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&io_exits_path) {
-                        stats.io_exits = parse_exit_count(&content);
+                        stats.insert("io_exits".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&mmio_exits_path) {
-                        stats.mmio_exits = parse_exit_count(&content);
+                        stats.insert("mmio_exits".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&insn_emulation_path) {
-                        stats.insn_emulation = parse_exit_count(&content);
+                        stats.insert("insn_emulation".to_string(), parse_exit_count(&content));
                     }
                 }
             }
@@ -196,9 +211,9 @@ fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
+fn collect_vmexit_stats(pid: Pid) -> HashMap<String, u64> {
     let debug_path = "/sys/kernel/debug/kvm";
-    let mut stats = VmExitStats::default();
+    let mut stats = HashMap::new();
     
     log_debug!("Collecting aarch64 exit stats for PID: {}", pid);
     
@@ -214,22 +229,22 @@ fn collect_vmexit_stats(pid: Pid) -> VmExitStats {
                     let wfi_exit_stat_path = entry.path().join("wfi_exit_stat");
                     
                     if let Ok(content) = fs::read_to_string(&exits_path) {
-                        stats.exits = parse_exit_count(&content);
+                        stats.insert("exits".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&hvc_exit_stat_path) {
-                        stats.hvc_exit_stat = parse_exit_count(&content);
+                        stats.insert("hvc_exit_stat".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&mmio_exit_kernel_path) {
-                        stats.mmio_exit_kernel = parse_exit_count(&content);
+                        stats.insert("mmio_exit_kernel".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&mmio_exit_user_path) {
-                        stats.mmio_exit_user = parse_exit_count(&content);
+                        stats.insert("mmio_exit_user".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&wfe_exit_stat_path) {
-                        stats.wfe_exit_stat = parse_exit_count(&content);
+                        stats.insert("wfe_exit_stat".to_string(), parse_exit_count(&content));
                     }
                     if let Ok(content) = fs::read_to_string(&wfi_exit_stat_path) {
-                        stats.wfi_exit_stat = parse_exit_count(&content);
+                        stats.insert("wfi_exit_stat".to_string(), parse_exit_count(&content));
                     }
                 }
             }
@@ -277,6 +292,54 @@ fn parse_exit_count(content: &str) -> u64 {
     }
     
     total
+}
+
+fn get_all_debug_files(pid: Pid, prev_stats: &mut HashMap<Pid, HashMap<String, u64>>) -> Vec<DebugFileInfo> {
+    let debug_path = "/sys/kernel/debug/kvm";
+    let mut files = Vec::new();
+    
+    if let Ok(entries) = fs::read_dir(debug_path) {
+        for entry in entries.flatten() {
+            if let Some(dir_name) = entry.file_name().to_str() {
+                if dir_name.starts_with(&format!("{}-", pid)) {
+                    if let Ok(file_entries) = fs::read_dir(&entry.path()) {
+                        for file_entry in file_entries.flatten() {
+                            let file_name = file_entry.file_name().to_string_lossy().to_string();
+                            let file_path = file_entry.path();
+                            
+                            if let Ok(content) = fs::read_to_string(&file_path) {
+                                let current_value = parse_exit_count(&content);
+                                
+                                // Get previous value from HashMap
+                                let prev_value = prev_stats
+                                    .get(&pid)
+                                    .and_then(|stats| stats.get(&file_name))
+                                    .copied()
+                                    .unwrap_or(0);
+                                
+                                let delta_value = current_value.saturating_sub(prev_value);
+                                
+                                files.push(DebugFileInfo {
+                                    name: file_name.clone(),
+                                    current_value,
+                                    delta_value,
+                                });
+                                
+                                // Update the HashMap with current value
+                                prev_stats
+                                    .entry(pid)
+                                    .or_insert_with(HashMap::new)
+                                    .insert(file_name, current_value);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    
+    files
 }
 
 // Scan /sys/kernel/debug/kvm directory to get all QEMU process PIDs
@@ -350,7 +413,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let mut system = System::new_all();
     let mut prev_cpu_times: HashMap<Pid, u64> = HashMap::new();
-    let mut prev_exit_stats: HashMap<Pid, VmExitStats> = HashMap::new();
+    let mut prev_exit_stats: HashMap<Pid, HashMap<String, u64>> = HashMap::new();
+    let mut prev_exit_stats_detail: HashMap<Pid, HashMap<String, u64>> = HashMap::new();
+    let mut app_state = AppState::default();
     
     log_info!("System initialized successfully");
 
@@ -387,29 +452,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let current_stats = collect_vmexit_stats(pid);
                 
                 // Calculate deltas
-                let mut delta_stats = VmExitStats::default();
-                if let Some(prev_stats) = prev_exit_stats.get(&pid) {
-                    delta_stats.exits = current_stats.exits.saturating_sub(prev_stats.exits);
-                    
-                    #[cfg(target_arch = "x86_64")]
-                    {
-                        delta_stats.halt_exits = current_stats.halt_exits.saturating_sub(prev_stats.halt_exits);
-                        delta_stats.irq_exits = current_stats.irq_exits.saturating_sub(prev_stats.irq_exits);
-                        delta_stats.kvm_msr_write = current_stats.kvm_msr_write.saturating_sub(prev_stats.kvm_msr_write);
-                        delta_stats.host_state_reload = current_stats.host_state_reload.saturating_sub(prev_stats.host_state_reload);
-                        delta_stats.io_exits = current_stats.io_exits.saturating_sub(prev_stats.io_exits);
-                        delta_stats.mmio_exits = current_stats.mmio_exits.saturating_sub(prev_stats.mmio_exits);
-                        delta_stats.insn_emulation = current_stats.insn_emulation.saturating_sub(prev_stats.insn_emulation);
-                    }
-                    
-                    #[cfg(target_arch = "aarch64")]
-                    {
-                        delta_stats.hvc_exit_stat = current_stats.hvc_exit_stat.saturating_sub(prev_stats.hvc_exit_stat);
-                        delta_stats.mmio_exit_kernel = current_stats.mmio_exit_kernel.saturating_sub(prev_stats.mmio_exit_kernel);
-                        delta_stats.mmio_exit_user = current_stats.mmio_exit_user.saturating_sub(prev_stats.mmio_exit_user);
-                        delta_stats.wfe_exit_stat = current_stats.wfe_exit_stat.saturating_sub(prev_stats.wfe_exit_stat);
-                        delta_stats.wfi_exit_stat = current_stats.wfi_exit_stat.saturating_sub(prev_stats.wfi_exit_stat);
-                    }
+                let mut delta_stats = HashMap::new();
+                for (key, current_value) in current_stats.iter() {
+                    let prev_value = prev_exit_stats
+                        .get(&pid)
+                        .and_then(|stats| stats.get(key))
+                        .copied()
+                        .unwrap_or(0);
+                    delta_stats.insert(key.clone(), current_value.saturating_sub(prev_value));
                 }
                 
                 vm_stats.push(VMStats {
@@ -432,186 +482,272 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         terminal.draw(|f| {
             let size = f.size();
             
-            // Architecture-specific headers and column widths
-            #[cfg(target_arch = "x86_64")]
-            {
-                let headers = vec![
-                    Cell::from("PID"),
-                    Cell::from("UUID"),
-                    Cell::from("User%"),
-                    Cell::from("Kern%"),
-                    Cell::from("vCPU%"),
-                    Cell::from("Mem(MB)"),
-                    Cell::from("Exits"),
-                    Cell::from("Halt"),
-                    Cell::from("IRQ"),
-                    Cell::from("MSR"),
-                    Cell::from("Reload"),
-                    Cell::from("IO"),
-                    Cell::from("MMIO"),
-                    Cell::from("Insn"),
-                ];
-                
-                let widths = &[
-                    Constraint::Length(6),
-                    Constraint::Length(36),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(8),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(7),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                ];
-                
-                let mut rows = Vec::new();
-                for vm in &vm_stats {
-                    rows.push(Row::new(vec![
-                        Cell::from(vm.pid.to_string()),
-                        Cell::from(vm.uuid.clone()),
-                        Cell::from(format!("{:.2}", vm.user_cpu)),
-                        Cell::from(format!("{:.2}", vm.kernel_cpu)),
-                        Cell::from(format!("{:.2}", vm.vcpu_usage)),
-                        Cell::from(format!("{:.2}", vm.memory as f64 / 1024.0 / 1024.0)),
-                        Cell::from(vm.exit_stats_delta.exits.to_string()),
-                        Cell::from(vm.exit_stats_delta.halt_exits.to_string()),
-                        Cell::from(vm.exit_stats_delta.irq_exits.to_string()),
-                        Cell::from(vm.exit_stats_delta.kvm_msr_write.to_string()),
-                        Cell::from(vm.exit_stats_delta.host_state_reload.to_string()),
-                        Cell::from(vm.exit_stats_delta.io_exits.to_string()),
-                        Cell::from(vm.exit_stats_delta.mmio_exits.to_string()),
-                        Cell::from(vm.exit_stats_delta.insn_emulation.to_string()),
-                    ]));
+            if app_state.show_detail {
+                // Detail view
+                if let Some(detail_pid) = app_state.detail_pid {
+let debug_files = get_all_debug_files(detail_pid, &mut prev_exit_stats_detail);
+                    
+                    let headers = vec![
+                        Cell::from("File"),
+                        Cell::from("Current"),
+                        Cell::from("Delta"),
+                    ];
+                    
+                    let widths = &[
+                        Constraint::Length(20),
+                        Constraint::Length(15),
+                        Constraint::Length(15),
+                    ];
+                    
+                    let mut rows = Vec::new();
+                    for file in debug_files {
+                        rows.push(Row::new(vec![
+                            Cell::from(file.name),
+                            Cell::from(file.current_value.to_string()),
+                            Cell::from(file.delta_value.to_string()),
+                        ]));
+                    }
+                    
+                    let title = format!("vmtop - VM Details (PID: {})", detail_pid);
+                    let table = Table::new(rows)
+                        .header(Row::new(headers).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+                        .block(Block::default().title(title).borders(Borders::ALL))
+                        .widths(widths);
+                    
+                    f.render_widget(table, size);
                 }
-                
-                let table = Table::new(rows)
-                    .header(Row::new(headers).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
-                    .block(Block::default().title("vmtop - Virtual Machine Monitor").borders(Borders::ALL))
-                    .widths(widths);
-                
-                f.render_widget(table, size);
-            }
-            
-            #[cfg(target_arch = "aarch64")]
-            {
-                let headers = vec![
-                    Cell::from("PID"),
-                    Cell::from("UUID"),
-                    Cell::from("User%"),
-                    Cell::from("Kern%"),
-                    Cell::from("vCPU%"),
-                    Cell::from("Mem(MB)"),
-                    Cell::from("Exits"),
-                    Cell::from("HVC"),
-                    Cell::from("MMIO-K"),
-                    Cell::from("MMIO-U"),
-                    Cell::from("WFE"),
-                    Cell::from("WFI"),
-                ];
-                
-                let widths = &[
-                    Constraint::Length(6),
-                    Constraint::Length(36),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(8),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                    Constraint::Length(7),
-                    Constraint::Length(7),
-                    Constraint::Length(6),
-                    Constraint::Length(6),
-                ];
-                
-                let mut rows = Vec::new();
-                for vm in &vm_stats {
-                    rows.push(Row::new(vec![
-                        Cell::from(vm.pid.to_string()),
-                        Cell::from(vm.uuid.clone()),
-                        Cell::from(format!("{:.2}", vm.user_cpu)),
-                        Cell::from(format!("{:.2}", vm.kernel_cpu)),
-                        Cell::from(format!("{:.2}", vm.vcpu_usage)),
-                        Cell::from(format!("{:.2}", vm.memory as f64 / 1024.0 / 1024.0)),
-                        Cell::from(vm.exit_stats_delta.exits.to_string()),
-                        Cell::from(vm.exit_stats_delta.hvc_exit_stat.to_string()),
-                        Cell::from(vm.exit_stats_delta.mmio_exit_kernel.to_string()),
-                        Cell::from(vm.exit_stats_delta.mmio_exit_user.to_string()),
-                        Cell::from(vm.exit_stats_delta.wfe_exit_stat.to_string()),
-                        Cell::from(vm.exit_stats_delta.wfi_exit_stat.to_string()),
-                    ]));
-                }
-                
-                let table = Table::new(rows)
-                    .header(Row::new(headers).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
-                    .block(Block::default().title("vmtop - Virtual Machine Monitor").borders(Borders::ALL))
-                    .widths(widths);
-                
-                f.render_widget(table, size);
-            }
-            
-            if vm_stats.is_empty() {
-                let empty_row = Row::new(vec![
-                    Cell::from("-"),
-                    Cell::from("No VMs found"),
-                    Cell::from("-"),
-                    Cell::from("-"),
-                    Cell::from("-"),
-                    Cell::from("-"),
-                    Cell::from("-"),
-                    Cell::from("-"),
-                ]);
-                
-                let table = Table::new(vec![empty_row])
-                    .header(Row::new(vec![
+            } else {
+                // Main view
+                // Architecture-specific headers and column widths
+                #[cfg(target_arch = "x86_64")]
+                {
+                    let headers = vec![
                         Cell::from("PID"),
                         Cell::from("UUID"),
                         Cell::from("User%"),
-                        Cell::from("Kernel%"),
+                        Cell::from("Kern%"),
                         Cell::from("vCPU%"),
-                        Cell::from("Memory(MB)"),
+                        Cell::from("Mem(MB)"),
                         Cell::from("Exits"),
-                        Cell::from("Status"),
-                    ]).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
-                    .block(Block::default().title("vmtop - Virtual Machine Monitor").borders(Borders::ALL))
-                    .widths(&[
-                        Constraint::Length(8),
+                        Cell::from("Halt"),
+                        Cell::from("IRQ"),
+                        Cell::from("MSR"),
+                        Cell::from("Reload"),
+                        Cell::from("IO"),
+                        Cell::from("MMIO"),
+                        Cell::from("Insn"),
+                    ];
+                    
+                    let widths = &[
+                        Constraint::Length(6),
                         Constraint::Length(36),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
                         Constraint::Length(8),
-                        Constraint::Length(8),
-                        Constraint::Length(8),
-                        Constraint::Length(12),
-                        Constraint::Length(8),
-                        Constraint::Length(8),
-                    ]);
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                        Constraint::Length(7),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                    ];
+                    
+                    let mut rows = Vec::new();
+                    for (i, vm) in vm_stats.iter().enumerate() {
+                        let mut style = Style::default();
+                        if i == app_state.selected_index {
+                            style = style.bg(Color::Blue);
+                        }
+                        
+                        rows.push(Row::new(vec![
+                            Cell::from(vm.pid.to_string()).style(style),
+                            Cell::from(vm.uuid.clone()).style(style),
+                            Cell::from(format!("{:.2}", vm.user_cpu)).style(style),
+                            Cell::from(format!("{:.2}", vm.kernel_cpu)).style(style),
+                            Cell::from(format!("{:.2}", vm.vcpu_usage)).style(style),
+                            Cell::from(format!("{:.2}", vm.memory as f64 / 1024.0 / 1024.0)).style(style),
+                            Cell::from(vm.exit_stats_delta.get("exits").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("halt_exits").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("irq_exits").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("kvm_msr_write").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("host_state_reload").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("io_exits").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("mmio_exits").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("insn_emulation").unwrap_or(&0).to_string()).style(style),
+                        ]));
+                    }
+                    
+                    let table = Table::new(rows)
+                        .header(Row::new(headers).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+                        .block(Block::default().title("vmtop - Virtual Machine Monitor (Use ↑↓ to select, Enter for details, q to quit)").borders(Borders::ALL))
+                        .widths(widths);
+                    
+                    f.render_widget(table, size);
+                }
                 
-                f.render_widget(table, size);
+                #[cfg(target_arch = "aarch64")]
+                {
+                    let headers = vec![
+                        Cell::from("PID"),
+                        Cell::from("UUID"),
+                        Cell::from("User%"),
+                        Cell::from("Kern%"),
+                        Cell::from("vCPU%"),
+                        Cell::from("Mem(MB)"),
+                        Cell::from("Exits"),
+                        Cell::from("HVC"),
+                        Cell::from("MMIO-K"),
+                        Cell::from("MMIO-U"),
+                        Cell::from("WFE"),
+                        Cell::from("WFI"),
+                    ];
+                    
+                    let widths = &[
+                        Constraint::Length(6),
+                        Constraint::Length(36),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                        Constraint::Length(8),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                        Constraint::Length(7),
+                        Constraint::Length(7),
+                        Constraint::Length(6),
+                        Constraint::Length(6),
+                    ];
+                    
+                    let mut rows = Vec::new();
+                    for (i, vm) in vm_stats.iter().enumerate() {
+                        let mut style = Style::default();
+                        if i == app_state.selected_index {
+                            style = style.bg(Color::Blue);
+                        }
+                        
+                        rows.push(Row::new(vec![
+                            Cell::from(vm.pid.to_string()).style(style),
+                            Cell::from(vm.uuid.clone()).style(style),
+                            Cell::from(format!("{:.2}", vm.user_cpu)).style(style),
+                            Cell::from(format!("{:.2}", vm.kernel_cpu)).style(style),
+                            Cell::from(format!("{:.2}", vm.vcpu_usage)).style(style),
+                            Cell::from(format!("{:.2}", vm.memory as f64 / 1024.0 / 1024.0)).style(style),
+                            Cell::from(vm.exit_stats_delta.get("exits").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("hvc_exit_stat").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("mmio_exit_kernel").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("mmio_exit_user").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("wfe_exit_stat").unwrap_or(&0).to_string()).style(style),
+                            Cell::from(vm.exit_stats_delta.get("wfi_exit_stat").unwrap_or(&0).to_string()).style(style),
+                        ]));
+                    }
+                    
+                    let table = Table::new(rows)
+                        .header(Row::new(headers).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+                        .block(Block::default().title("vmtop - Virtual Machine Monitor (Use ↑↓ to select, Enter for details, q to quit)").borders(Borders::ALL))
+                        .widths(widths);
+                    
+                    f.render_widget(table, size);
+                }
+                
+                if vm_stats.is_empty() {
+                    let empty_row = Row::new(vec![
+                        Cell::from("-"),
+                        Cell::from("No VMs found"),
+                        Cell::from("-"),
+                        Cell::from("-"),
+                        Cell::from("-"),
+                        Cell::from("-"),
+                        Cell::from("-"),
+                        Cell::from("-"),
+                    ]);
+                    
+                    let table = Table::new(vec![empty_row])
+                        .header(Row::new(vec![
+                            Cell::from("PID"),
+                            Cell::from("UUID"),
+                            Cell::from("User%"),
+                            Cell::from("Kernel%"),
+                            Cell::from("vCPU%"),
+                            Cell::from("Memory(MB)"),
+                            Cell::from("Exits"),
+                            Cell::from("Status"),
+                        ]).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+                        .block(Block::default().title("vmtop - Virtual Machine Monitor").borders(Borders::ALL))
+                        .widths(&[
+                            Constraint::Length(8),
+                            Constraint::Length(36),
+                            Constraint::Length(8),
+                            Constraint::Length(8),
+                            Constraint::Length(8),
+                            Constraint::Length(12),
+                            Constraint::Length(8),
+                            Constraint::Length(8),
+                        ]);
+                    
+                    f.render_widget(table, size);
+                }
             }
         })?;
         
-        // Check keyboard events
-        if event::poll(Duration::from_millis(100))? {
+// Check keyboard events with shorter timeout for better responsiveness
+        if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                let mut should_redraw = false;
+                
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Char('Q') => {
                         log_info!("User requested exit, shutting down...");
                         break;
                     }
                     KeyCode::Esc => {
-                        log_info!("User pressed ESC, shutting down...");
-                        break;
+                        if app_state.show_detail {
+                            app_state.show_detail = false;
+                            app_state.detail_pid = None;
+                            should_redraw = true;
+                        } else {
+                            log_info!("User pressed ESC, shutting down...");
+                            break;
+                        }
+                    }
+                    KeyCode::Up => {
+                        if !app_state.show_detail && !vm_stats.is_empty() {
+                            if app_state.selected_index > 0 {
+                                app_state.selected_index -= 1;
+                                should_redraw = true;
+                            }
+                        }
+                    }
+                    KeyCode::Down => {
+                        if !app_state.show_detail && !vm_stats.is_empty() {
+                            if app_state.selected_index < vm_stats.len().saturating_sub(1) {
+                                app_state.selected_index += 1;
+                                should_redraw = true;
+                            }
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if !app_state.show_detail && !vm_stats.is_empty() {
+                            if let Some(selected_vm) = vm_stats.get(app_state.selected_index) {
+                                app_state.show_detail = true;
+                                app_state.detail_pid = Some(selected_vm.pid);
+                                should_redraw = true;
+                            }
+                        }
                     }
                     _ => {}
+                }
+                
+                // Only redraw when necessary
+                if should_redraw {
+                    continue;
                 }
             }
         }
         
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        // Shorter sleep for more responsive updates
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
     
     // Clean up terminal
